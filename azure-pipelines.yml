@@ -1,0 +1,79 @@
+# Starter pipeline
+# Start with a minimal pipeline that you can customize to build and deploy your code.
+# Add steps that build, run tests, deploy, and more:
+# https://aka.ms/yaml
+
+trigger:
+- main
+
+pool:
+  name: titan-ubuntu-pool
+
+variables:
+  - name:  tag
+    value: '$(Build.BuildId)'
+  - group: template-application-variables
+  - name: imageRepo
+    value: 'titanfad5globalcr.azurecr.io'
+
+
+# Artifacts build only. Your source build / any pre-requisite should happen before this stage
+stages:
+- stage: Build
+  displayName: Build & Push
+  jobs:
+  - job: Build
+    displayName: Build image
+    steps:
+    - task: Docker@2
+      displayName: Build image
+      inputs:
+        containerRegistry: 'titan_acr_connection'
+        repository: $(app.name)
+        command: 'build'
+        Dockerfile: '$(Build.SourcesDirectory)/application/Dockerfile'
+        tags: $(tag)
+    - task: Docker@2
+      displayName: Push image to ACR
+      inputs:
+        containerRegistry: 'titan_acr_connection'
+        repository: $(app.name)
+        command: 'push'
+        tags: $(tag)
+    - task: PublishPipelineArtifact@1
+      inputs:
+        targetPath: '$(Build.SourcesDirectory)/k8-manifest'
+        artifact: 'manifests'
+        publishLocation: 'pipeline'
+              
+# Deploy to DEV Environment - using ENVIRONMENTS from AZ DevOps
+- stage: Deploy
+  displayName: Deploy to DEV
+  dependsOn: Build
+  jobs:
+  - deployment: Deploy
+    displayName: Deploy to AKS DEV
+    environment: 'aks-microservice-dev-we.microservice-app'
+    pool:
+        name: titan-ubuntu-pool
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - task: DownloadPipelineArtifact@2
+            inputs:
+              buildType: 'current'
+              artifactName: 'manifests'
+              targetPath: '$(Pipeline.Workspace)/manifests'
+          - task: KubernetesManifest@0
+            inputs:
+              action: 'deploy'
+              namespace: '$(app.name)'
+              manifests: |
+                $(Pipeline.Workspace)/manifests/deployment.yaml
+              #containers: '$(imageRepo):$(tag)'
+        
+            
+             
+    
+
